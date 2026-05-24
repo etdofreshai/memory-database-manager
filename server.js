@@ -99,12 +99,11 @@ app.post('/auth/logout', (req, res) => {
 // Auth gate middleware — skip if no password configured
 app.use((req, res, next) => {
   if (!UI_PASSWORD) return next();
-  // Allow auth endpoints and static assets through
+  // Allow auth endpoints through
   if (req.path.startsWith('/auth/')) return next();
-  if (req.path === '/' || req.path === '/index.html') {
-    // Serve the SPA even when not authed — the frontend login gate handles it
-    return next();
-  }
+  // Allow static assets (SPA HTML, JS, CSS, favicon) so the login form can render
+  if (req.path === '/' || req.path === '/index.html' || req.path.startsWith('/assets/') || req.path === '/favicon.ico') return next();
+  // Block API/proxy routes without valid auth
   if (!isValidAuth(req)) return res.status(401).json({ error: 'Authentication required' });
   next();
 });
