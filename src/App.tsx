@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom';
+import LoginGate from './components/LoginGate';
 
 // Memory DB pages
 import Messages from './pages/Messages';
@@ -188,6 +189,7 @@ export default function App() {
   };
 
   return (
+    <LoginGate>
     <div className="app-layout">
       <button className="hamburger" onClick={() => setMobileOpen(!mobileOpen)}>☰</button>
       <nav className={`sidebar ${mobileOpen ? 'open' : ''}`}>
@@ -337,5 +339,6 @@ export default function App() {
         </Routes>
       </main>
     </div>
+    </LoginGate>
   );
 }

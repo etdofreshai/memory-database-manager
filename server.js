@@ -1,11 +1,17 @@
 import express from 'express';
 import http from 'http';
 import https from 'https';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
+const UI_PASSWORD = process.env.UI_PASSWORD || '';
+const COOKIE_NAME = 'mdb_auth';
+// sessions live 7 days
+const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
+const sessions = new Map();
 
 // Service configurations
 const services = {
@@ -44,6 +50,64 @@ const services = {
 };
 
 const app = express();
+app.use(express.json());
+
+// ── Auth helpers ──────────────────────────────────────────
+function isValidAuth(req) {
+  if (!UI_PASSWORD) return true; // no password set = open access
+  const token = req.cookies?.[COOKIE_NAME] || parseCookies(req.headers.cookie || '')[COOKIE_NAME];
+  if (!token) return false;
+  const entry = sessions.get(token);
+  if (!entry) return false;
+  if (Date.now() - entry.ts > SESSION_TTL) { sessions.delete(token); return false; }
+  return true;
+}
+
+function parseCookies(str) {
+  const out = {};
+  for (const part of str.split(';')) {
+    const [k, ...v] = part.trim().split('=');
+    if (k) out[k] = v.join('=');
+  }
+  return out;
+}
+
+// Auth status endpoint (no middleware — always reachable)
+app.get('/auth/status', (_req, res) => {
+  res.json({ required: !!UI_PASSWORD });
+});
+
+// Login endpoint
+app.post('/auth/login', (req, res) => {
+  if (!UI_PASSWORD) return res.json({ ok: true }); // no password needed
+  const { password } = req.body || {};
+  if (password !== UI_PASSWORD) return res.status(401).json({ ok: false, error: 'Invalid password' });
+  const token = crypto.randomBytes(32).toString('hex');
+  sessions.set(token, { ts: Date.now() });
+  res.setHeader('Set-Cookie', `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(SESSION_TTL / 1000)}`);
+  return res.json({ ok: true });
+});
+
+// Logout endpoint
+app.post('/auth/logout', (req, res) => {
+  const token = parseCookies(req.headers.cookie || '')[COOKIE_NAME];
+  if (token) sessions.delete(token);
+  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`);
+  res.json({ ok: true });
+});
+
+// Auth gate middleware — skip if no password configured
+app.use((req, res, next) => {
+  if (!UI_PASSWORD) return next();
+  // Allow auth endpoints and static assets through
+  if (req.path.startsWith('/auth/')) return next();
+  if (req.path === '/' || req.path === '/index.html') {
+    // Serve the SPA even when not authed — the frontend login gate handles it
+    return next();
+  }
+  if (!isValidAuth(req)) return res.status(401).json({ error: 'Authentication required' });
+  next();
+});
 
 // Service config endpoint (tells frontend which services are configured)
 app.get('/service-config', (_req, res) => {
